@@ -19,12 +19,13 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "dma.h"
+#include "i2c.h"
 #include "tim.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "ws2812.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,12 +35,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define WS2812_NUM     16                      /* 级联 LED 总数（两级 × 8） */
-#define WS2812_RESET   48                      /* 帧尾复位/锁存周期数（≈60µs） */
-#define WS2812_BITS    (WS2812_NUM * 24)       /* 每颗 24bit (GRB) */
-#define WS2812_BUFLEN  (WS2812_BITS + WS2812_RESET)
-#define WS2812_CODE0   30                      /* 0 码高电平计数 ≈0.42µs */
-#define WS2812_CODE1   60                      /* 1 码高电平计数 ≈0.83µs */
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -50,15 +46,14 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* DMA 逐周期搬入 TIM2->CCR1 的比较值缓冲区；半字以匹配 DMA HALFWORD 对齐 */
-static uint16_t ws2812_buf[WS2812_BUFLEN];
+/* 当前已显示的状态：0=熄灭 1=红 2=蓝，-1=未初始化（强制首次刷新） */
+static int8_t led_state = -1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-static void WS2812_SetAll(uint8_t r, uint8_t g, uint8_t b);
-static void WS2812_Send(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -97,6 +92,7 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_TIM2_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -108,13 +104,55 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    WS2812_SetAll(255, 0, 0);   /* 全部亮红 */
-    WS2812_Send();
-    HAL_Delay(5000);
+    /* 读取开关：PB8 高 -> 红，PB9 高 -> 蓝，都不为高 -> 熄灭；同时为高时红色优先。 */
+    int8_t want;
+    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_SET)
+    {
+      want = 1;   /* 红 */
+    }
+    else if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_SET)
+    {
+      want = 2;   /* 蓝 */
+    }
+    else
+    {
+      want = 0;   /* 灭 */
+    }
 
-    WS2812_SetAll(0, 0, 255);   /* 全部亮蓝 */
-    WS2812_Send();
-    HAL_Delay(5000);
+    /* 仅在“状态发生变化”时刷新灯：避免每 20ms 重启 DMA 造成的反复闪烁；
+       变化后再延时复测一次做去抖，过滤开关抖动/电平瞬时跌落。 */
+    if (want != led_state)
+    {
+      HAL_Delay(20);   /* 去抖窗口 */
+
+      int8_t confirm;
+      if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_SET)
+      {
+        confirm = 1;
+      }
+      else if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_SET)
+      {
+        confirm = 2;
+      }
+      else
+      {
+        confirm = 0;
+      }
+
+      if (confirm == want)   /* 两次读数一致才认为稳定 */
+      {
+        switch (want)
+        {
+          case 1:  WS2812_SetAll(WS2812_RED);  break;
+          case 2:  WS2812_SetAll(WS2812_BLUE); break;
+          default: WS2812_Clear();             break;
+        }
+        WS2812_Send();
+        led_state = want;
+      }
+    }
+
+    HAL_Delay(10);   /* 轮询间隔 */
   }
   /* USER CODE END 3 */
 }
@@ -159,43 +197,7 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-/**
-  * @brief  把所有 LED 设为同一颜色，并把对应的 PWM 比较值填入 ws2812_buf。
-  * @param  r,g,b: 0~255 的红/绿/蓝分量。
-  * @note   WS2812 线序为 GRB，每字节 MSB 先发。
-  */
-static void WS2812_SetAll(uint8_t r, uint8_t g, uint8_t b)
-{
-  uint8_t grb[3] = { g, r, b };
-  uint32_t idx = 0;
 
-  for (uint32_t led = 0; led < WS2812_NUM; led++)
-  {
-    for (uint32_t c = 0; c < 3; c++)
-    {
-      for (int8_t bit = 7; bit >= 0; bit--)
-      {
-        ws2812_buf[idx++] = (grb[c] & (1u << bit)) ? WS2812_CODE1 : WS2812_CODE0;
-      }
-    }
-  }
-
-  /* 帧尾复位段：保持低电平 ≥50µs，并让 CCR 停在 0 */
-  while (idx < WS2812_BUFLEN)
-  {
-    ws2812_buf[idx++] = 0;
-  }
-}
-
-/**
-  * @brief  通过 PWM+DMA 把 ws2812_buf 发送出去。
-  * @note   Normal 模式下传输完成时 HAL 会自动关闭 CC1 的 DMA 请求并将通道状态
-  *         置回 READY，因此每次刷新可直接再次调用本函数。
-  */
-static void WS2812_Send(void)
-{
-  HAL_TIM_PWM_Start_DMA(&htim2, TIM_CHANNEL_1, (uint32_t *)ws2812_buf, WS2812_BUFLEN);
-}
 /* USER CODE END 4 */
 
 /**
