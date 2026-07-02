@@ -42,18 +42,30 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
+# Third-party u8g2 library sources (vendored under applications/u8g2;
+# kept out of Middlewares/ and Drivers/ since STM32CubeMX code regeneration
+# (DeletePrevious=true) wipes and rewrites those directories)
+file(GLOB U8G2_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/applications/u8g2/csrc/*.c"
+)
+
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 
     # Add user sources here
-    ${CMAKE_CURRENT_SOURCE_DIR}/Applications/ws2812.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/applications/ws2812.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/applications/vibration.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/applications/oled.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/applications/buzzer.c
+    ${U8G2_SOURCES}
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
     # Add user defined include paths
-    ${CMAKE_CURRENT_SOURCE_DIR}/Applications
+    ${CMAKE_CURRENT_SOURCE_DIR}/applications
+    ${CMAKE_CURRENT_SOURCE_DIR}/applications/u8g2/csrc
 )
 
 # Add project symbols (macros)

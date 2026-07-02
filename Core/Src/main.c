@@ -26,6 +26,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "ws2812.h"
+#include "vibration.h"
+#include "oled.h"
+#include "buzzer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,6 +51,8 @@
 /* USER CODE BEGIN PV */
 /* 当前已显示的状态：0=熄灭 1=红 2=蓝，-1=未初始化（强制首次刷新） */
 static int8_t led_state = -1;
+/* OLED 上一次显示的振动计数，用于避免每轮循环都重绘；UINT32_MAX 强制首次刷新 */
+static uint32_t oled_shown_count = 0xFFFFFFFFU;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -94,7 +99,9 @@ int main(void)
   MX_TIM2_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-
+  Vibration_Init();
+  OLED_Init();
+  Buzzer_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -151,6 +158,16 @@ int main(void)
         led_state = want;
       }
     }
+
+    /* 振动计数由 PA10 上升沿中断累加，这里只负责在计数变化时刷新 OLED 显示、蜂鸣一声 */
+    uint32_t vib_count = Vibration_GetCount();
+    if (vib_count != oled_shown_count)
+    {
+      OLED_ShowCount(vib_count);
+      Buzzer_Beep();
+      oled_shown_count = vib_count;
+    }
+    Buzzer_Update();   /* 检测蜂鸣是否到时，到时则关闭 */
 
     HAL_Delay(10);   /* 轮询间隔 */
   }
