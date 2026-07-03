@@ -11,7 +11,7 @@ static volatile uint32_t buzzer_start_tick = 0;
 
 void Buzzer_Init(void)
 {
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);   /* 拉高 = 不触发 */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);   /* 拉高 = 不触发 */
   buzzer_active = 0;
 }
 
@@ -23,7 +23,7 @@ void Buzzer_Beep(void)
   {
     return;
   }
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
   buzzer_start_tick = HAL_GetTick();
   buzzer_active = 1;
 }
@@ -33,7 +33,7 @@ void Buzzer_Update(void)
 {
   if (buzzer_active && (HAL_GetTick() - buzzer_start_tick >= BUZZER_BEEP_MS))
   {
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
     buzzer_active = 0;
   }
 }
