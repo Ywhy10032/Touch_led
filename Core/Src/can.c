@@ -38,11 +38,11 @@ void MX_CAN_Init(void)
 
   /* USER CODE END CAN_Init 1 */
   hcan.Instance = CAN1;
-  hcan.Init.Prescaler = 16;
+  hcan.Init.Prescaler = 6;
   hcan.Init.Mode = CAN_MODE_NORMAL;
-  hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan.Init.TimeSeg1 = CAN_BS1_1TQ;
-  hcan.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan.Init.SyncJumpWidth = CAN_SJW_2TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_5TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_2TQ;
   hcan.Init.TimeTriggeredMode = DISABLE;
   hcan.Init.AutoBusOff = DISABLE;
   hcan.Init.AutoWakeUp = DISABLE;
@@ -54,7 +54,7 @@ void MX_CAN_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN_Init 2 */
-
+  CAN_Start();
   /* USER CODE END CAN_Init 2 */
 
 }
@@ -116,5 +116,66 @@ void HAL_CAN_MspDeInit(CAN_HandleTypeDef* canHandle)
 }
 
 /* USER CODE BEGIN 1 */
+
+/* 配置一个“全通过”过滤器并启动 CAN 外设。
+   仅发送也需要 HAL_CAN_Start 将 CAN 从初始化模式切到正常模式。 */
+void CAN_Start(void)
+{
+  CAN_FilterTypeDef sFilterConfig;
+
+  sFilterConfig.FilterBank = 0;
+  sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+  sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+  sFilterConfig.FilterIdHigh = 0x0000;
+  sFilterConfig.FilterIdLow = 0x0000;
+  sFilterConfig.FilterMaskIdHigh = 0x0000;   /* 掩码全 0 -> 接收所有 ID */
+  sFilterConfig.FilterMaskIdLow = 0x0000;
+  sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+  sFilterConfig.FilterActivation = ENABLE;
+  sFilterConfig.SlaveStartFilterBank = 14;
+
+  if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_CAN_Start(&hcan) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+HAL_StatusTypeDef CAN_SendStatus(uint8_t led_state, uint32_t vib_count)
+{
+  CAN_TxHeaderTypeDef txHeader;
+  uint8_t data[8] = {0};
+  uint32_t txMailbox;
+  uint32_t start;
+
+  txHeader.StdId = CAN_STATUS_STD_ID;
+  txHeader.ExtId = 0;
+  txHeader.IDE = CAN_ID_STD;
+  txHeader.RTR = CAN_RTR_DATA;
+  txHeader.DLC = 5;
+  txHeader.TransmitGlobalTime = DISABLE;
+
+  data[0] = led_state;
+  data[1] = (uint8_t)(vib_count & 0xFFU);
+  data[2] = (uint8_t)((vib_count >> 8) & 0xFFU);
+  data[3] = (uint8_t)((vib_count >> 16) & 0xFFU);
+  data[4] = (uint8_t)((vib_count >> 24) & 0xFFU);
+
+  /* 等待有空闲发送邮箱，最多 10ms，避免邮箱满时静默丢帧 */
+  start = HAL_GetTick();
+  while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) == 0U)
+  {
+    if ((HAL_GetTick() - start) > 10U)
+    {
+      return HAL_TIMEOUT;
+    }
+  }
+
+  return HAL_CAN_AddTxMessage(&hcan, &txHeader, data, &txMailbox);
+}
 
 /* USER CODE END 1 */

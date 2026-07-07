@@ -158,6 +158,8 @@ int main(void)
         }
         WS2812_Send();
         led_state = want;
+        /* 灯状态变化：上报给上位机 */
+        CAN_SendStatus((uint8_t)led_state, Vibration_GetCount());
       }
     }
 
@@ -168,6 +170,8 @@ int main(void)
       OLED_ShowCount(vib_count);
       Buzzer_Beep();
       oled_shown_count = vib_count;
+      /* 振动计数变化：上报给上位机 */
+      CAN_SendStatus((uint8_t)led_state, vib_count);
     }
     Buzzer_Update();   /* 检测蜂鸣是否到时，到时则关闭 */
 
